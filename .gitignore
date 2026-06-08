@@ -1,0 +1,36 @@
+# Gradle files
+.gradle/
+build/
+app/build/
+
+# Local configuration files
+local.properties
+
+# Android Studio / IntelliJ files
+.idea/
+*.iml
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Gradle signing keys
+*.jks
+*.keystore
+
+# Built APKs/Bundles
+*.apk
+*.aar
+*.ap_
+
+# Logs
+*.log
+
+# OS / IDE specific
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Web Simulator dependencies / caches
+web-simulator/node_modules/
