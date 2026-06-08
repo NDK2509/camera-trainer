@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -136,30 +137,29 @@ fun ScoringResultDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 4. Itemized Critique list
-                Text(
-                    text = "Composition Critique:",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
+                // 4. Critique List (Scrollable, including Gemini AI review)
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp),
+                        .heightIn(max = 250.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    item {
+                        Text(
+                            text = "Composition Critique:",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start
+                        )
+                    }
+
                     items(scoreResult.detailedFeedback) { feedbackItem ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.Top
                         ) {
-                            // Custom bullet indicator
                             Text(
                                 text = "• ",
                                 color = scoreColor,
@@ -172,6 +172,35 @@ fun ScoringResultDialog(
                                 fontSize = 13.sp,
                                 lineHeight = 18.sp
                             )
+                        }
+                    }
+
+                    if (scoreResult.aiFeedback != null) {
+                        item {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "✨ Gemini AI Critique",
+                                        color = Color(0xFF8AB4F8),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = scoreResult.aiFeedback,
+                                        color = Color.White.copy(alpha = 0.9f),
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }

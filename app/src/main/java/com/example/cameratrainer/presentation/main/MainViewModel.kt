@@ -1,9 +1,14 @@
 package com.example.cameratrainer.presentation.main
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.cameratrainer.R
 import com.example.cameratrainer.domain.model.CompositionRule
 import com.example.cameratrainer.domain.model.CropRect
 import com.example.cameratrainer.domain.model.Photo
@@ -11,17 +16,15 @@ import com.example.cameratrainer.domain.model.PhotoMetadata
 import com.example.cameratrainer.domain.model.PointOfInterest
 import com.example.cameratrainer.domain.model.ScoreResult
 import com.example.cameratrainer.domain.usecase.EvaluateCompositionUseCase
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 
-/**
- * ViewModel managing the logic of the camera composition screen.
- * Handles coordinate translation from screen space to normalized photo space.
- */
 class MainViewModel(
     private val evaluateCompositionUseCase: EvaluateCompositionUseCase = EvaluateCompositionUseCase()
 ) : ViewModel() {
@@ -29,20 +32,19 @@ class MainViewModel(
     private val _state = MutableStateFlow(MainState())
     val state: StateFlow<MainState> = _state.asStateFlow()
 
-    // Mock photo list for composition training challenges
     private val photoRepositoryList = listOf(
         Photo(
             id = "1",
-            url = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1600&q=80",
-            author = "Sean Oulashin",
-            description = "Stunning red sunrise sky over a wild sandy beach.",
+            url = R.drawable.banner_2,
+            author = "Local Asset",
+            description = "Practice framing and scaling with this local banner photo.",
             metadata = PhotoMetadata(
-                width = 1600,
-                height = 1000,
-                targetRule = CompositionRule.HORIZON,
+                width = 500,
+                height = 500,
+                targetRule = CompositionRule.RULE_OF_THIRDS,
                 pointsOfInterest = listOf(
-                    PointOfInterest(label = "Sunrise", x = 0.67f, y = 0.35f, weight = 1.0f),
-                    PointOfInterest(label = "Sea Horizon", x = 0.50f, y = 0.66f, weight = 0.8f)
+                    PointOfInterest(label = "Highlight Element", x = 0.33f, y = 0.33f, weight = 1.0f),
+                    PointOfInterest(label = "Symmetric Line", x = 0.5f, y = 0.5f, weight = 0.5f)
                 )
             )
         ),
@@ -96,9 +98,6 @@ class MainViewModel(
         }
     }
 
-    /**
-     * Dispatches user interactions received from the View.
-     */
     fun onEvent(event: MainUiEvent) {
         when (event) {
             is MainUiEvent.OnPan -> handlePan(event.dragAmount)
@@ -115,7 +114,26 @@ class MainViewModel(
             is MainUiEvent.OnViewfinderSizeMeasured -> {
                 _state.update { it.copy(viewfinderSize = event.size) }
             }
-            is MainUiEvent.OnCapturePressed -> evaluateComposition()
+            is MainUiEvent.OnViewfinderScaleChanged -> {
+                _state.update { it.copy(viewfinderScale = event.scale.coerceIn(0.4f, 1.0f)) }
+            }
+            is MainUiEvent.OnLoadSettings -> {
+                val prefs = event.context.getSharedPreferences("camera_trainer_prefs", android.content.Context.MODE_PRIVATE)
+                val savedKey = prefs.getString("gemini_api_key", "") ?: ""
+                _state.update { it.copy(apiKey = savedKey) }
+            }
+            is MainUiEvent.OnOpenSettings -> {
+                _state.update { it.copy(isSettingsOpen = true) }
+            }
+            is MainUiEvent.OnCloseSettings -> {
+                _state.update { it.copy(isSettingsOpen = false) }
+            }
+            is MainUiEvent.OnSaveApiKey -> {
+                val prefs = event.context.getSharedPreferences("camera_trainer_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().putString("gemini_api_key", event.apiKey).apply()
+                _state.update { it.copy(apiKey = event.apiKey, isSettingsOpen = false) }
+            }
+            is MainUiEvent.OnCapturePressed -> evaluateComposition(event.context)
             is MainUiEvent.OnDismissResultDialog -> {
                 _state.update { it.copy(scoreResult = null) }
             }
@@ -126,39 +144,26 @@ class MainViewModel(
         }
     }
 
-    /**
-     * Handles pan gesture. Restricts translation boundaries to keep the photo in sight.
-     */
     private fun handlePan(dragAmount: Offset) {
         val currentScale = _state.value.scale
         val currentOffset = _state.value.offset
-        
-        // Only allow pan when zoomed in (Scale > 1.0). Limits offsets based on scaling.
         val maxOffset = 500f * currentScale
         val newX = (currentOffset.x + dragAmount.x).coerceIn(-maxOffset, maxOffset)
         val newY = (currentOffset.y + dragAmount.y).coerceIn(-maxOffset, maxOffset)
-        
         _state.update { it.copy(offset = Offset(newX, newY)) }
     }
 
-    /**
-     * Handles pinch-to-zoom. Limits zoom from 1.0x to 4.0x.
-     */
     private fun handleZoom(scaleFactor: Float) {
         val newScale = (_state.value.scale * scaleFactor).coerceIn(1.0f, 4.0f)
         _state.update { 
             it.copy(
                 scale = newScale,
-                // Adjust translation to keep scale anchor point smooth
                 offset = it.offset * (newScale / it.scale)
             ) 
         }
     }
 
-    /**
-     * Core mapping math: Calculates the CropRect and runs grading.
-     */
-    private fun evaluateComposition() {
+    private fun evaluateComposition(context: android.content.Context) {
         val stateVal = _state.value
         val photo = stateVal.activePhoto ?: return
         val canvasSize = stateVal.canvasSize
@@ -171,11 +176,8 @@ class MainViewModel(
 
         _state.update { it.copy(isEvaluating = true) }
 
-        viewModelScope.launch {
-            // Simulate AI engine score evaluation delay of 800ms
-            delay(800)
-
-            // 1. Compute fitted size of original photo inside screen canvas boundaries (Fit mode)
+        viewModelScope.launch(Dispatchers.IO) {
+            // 1. Compute fitted size of original photo inside screen canvas boundaries (ContentScale.Crop mode)
             val imgW = photo.metadata.width.toFloat()
             val imgH = photo.metadata.height.toFloat()
             val imgRatio = imgW / imgH
@@ -184,11 +186,13 @@ class MainViewModel(
             val baseW: Float
             val baseH: Float
             if (imgRatio > canvasRatio) {
-                baseW = canvasSize.width
-                baseH = canvasSize.width / imgRatio
-            } else {
+                // Fitted height equals canvas height, width overflows (crop)
                 baseH = canvasSize.height
                 baseW = canvasSize.height * imgRatio
+            } else {
+                // Fitted width equals canvas width, height overflows (crop)
+                baseW = canvasSize.width
+                baseH = canvasSize.width / imgRatio
             }
 
             // 2. Compute screen dimensions of photo after scale updates
@@ -213,7 +217,6 @@ class MainViewModel(
 
             // 6. Check validation overlap bounds
             if (normLeft >= normRight || normTop >= normBottom) {
-                // Viewfinder is completely off-image boundaries
                 _state.update {
                     it.copy(
                         isEvaluating = false,
@@ -235,14 +238,110 @@ class MainViewModel(
             )
 
             // 7. Delegate grading to use case
-            val result = evaluateCompositionUseCase(cropRect, photo.metadata)
+            val mathResult = evaluateCompositionUseCase(cropRect, photo.metadata)
+
+            // 8. Gemini API Call (if API Key is configured)
+            val aiCritiqueText = if (stateVal.apiKey.isNotEmpty()) {
+                try {
+                    // Load active photo as Bitmap using Coil
+                    val loader = coil.ImageLoader(context)
+                    val request = coil.request.ImageRequest.Builder(context)
+                        .data(photo.url)
+                        .allowHardware(false)
+                        .build()
+                    val drawable = (loader.execute(request) as? coil.request.SuccessResult)?.drawable
+                    val bitmap = drawable?.toBitmap()
+
+                    if (bitmap != null) {
+                        val leftPx = (cropRect.left * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
+                        val topPx = (cropRect.top * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
+                        val rightPx = (cropRect.right * bitmap.width).toInt().coerceIn(leftPx + 1, bitmap.width)
+                        val bottomPx = (cropRect.bottom * bitmap.height).toInt().coerceIn(topPx + 1, bitmap.height)
+                        
+                        val croppedBitmap = Bitmap.createBitmap(bitmap, leftPx, topPx, rightPx - leftPx, bottomPx - topPx)
+                        val stream = ByteArrayOutputStream()
+                        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                        val base64Image = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+                        
+                        callGeminiApi(base64Image, stateVal.apiKey)
+                    } else {
+                        "Failed to load image for AI analysis."
+                    }
+                } catch (e: Exception) {
+                    "Error processing image for Gemini: ${e.localizedMessage}"
+                }
+            } else {
+                "No API Key configured. Please go to Settings to add your Gemini API Key for rich AI analysis and framing recommendations."
+            }
+
+            val finalResult = mathResult.copy(aiFeedback = aiCritiqueText)
 
             _state.update {
                 it.copy(
                     isEvaluating = false,
-                    scoreResult = result
+                    scoreResult = finalResult
                 )
             }
+        }
+    }
+
+    private fun callGeminiApi(base64Image: String, apiKey: String): String {
+        val urlStr = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        val url = java.net.URL(urlStr)
+        val conn = url.openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.doOutput = true
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
+
+        val prompt = "Analyze this photo composition crop. Write a detailed critique focusing on:\n" +
+                "1. Pros of the framing.\n" +
+                "2. Cons / Areas of improvement.\n" +
+                "3. Creative ideas to make it more beautiful (e.g. alignment rules, angles, focal elements)."
+
+        val requestJson = org.json.JSONObject().apply {
+            put("contents", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("parts", org.json.JSONArray().apply {
+                        put(org.json.JSONObject().apply {
+                            put("text", prompt)
+                        })
+                        put(org.json.JSONObject().apply {
+                            put("inlineData", org.json.JSONObject().apply {
+                                put("mimeType", "image/jpeg")
+                                put("data", base64Image)
+                            })
+                        })
+                    })
+                })
+            })
+        }
+
+        return try {
+            java.io.OutputStreamWriter(conn.outputStream).use { writer ->
+                writer.write(requestJson.toString())
+                writer.flush()
+            }
+
+            val responseCode = conn.responseCode
+            if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+                val responseJson = org.json.JSONObject(responseText)
+                val candidates = responseJson.getJSONArray("candidates")
+                val firstCandidate = candidates.getJSONObject(0)
+                val content = firstCandidate.getJSONObject("content")
+                val parts = content.getJSONArray("parts")
+                val text = parts.getJSONObject(0).getString("text")
+                text
+            } else {
+                val errorText = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                "Failed to generate feedback: HTTP $responseCode\n$errorText"
+            }
+        } catch (e: Exception) {
+            "Failed to connect to Gemini API: ${e.localizedMessage}"
+        } finally {
+            conn.disconnect()
         }
     }
 }

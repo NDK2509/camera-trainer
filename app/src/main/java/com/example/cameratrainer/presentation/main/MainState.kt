@@ -25,6 +25,11 @@ data class MainState(
     // Measured dimensions of the canvas and viewfinder (measured dynamically at runtime)
     val canvasSize: Size = Size.Zero,
     val viewfinderSize: Size = Size.Zero,
+    val viewfinderScale: Float = 0.8f, // Viewfinder scale multiplier (0.4f to 1.0f)
+    
+    // Settings state
+    val isSettingsOpen: Boolean = false,
+    val apiKey: String = "",
     
     // Scoring evaluation state
     val isEvaluating: Boolean = false,

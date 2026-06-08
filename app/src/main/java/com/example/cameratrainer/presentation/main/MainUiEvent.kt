@@ -19,9 +19,16 @@ sealed interface MainUiEvent {
     // Layout dimension measurements
     data class OnCanvasSizeMeasured(val size: Size) : MainUiEvent
     data class OnViewfinderSizeMeasured(val size: Size) : MainUiEvent
+    data class OnViewfinderScaleChanged(val scale: Float) : MainUiEvent
+    
+    // Settings actions
+    data class OnLoadSettings(val context: android.content.Context) : MainUiEvent
+    object OnOpenSettings : MainUiEvent
+    object OnCloseSettings : MainUiEvent
+    data class OnSaveApiKey(val apiKey: String, val context: android.content.Context) : MainUiEvent
     
     // Button click action events
-    object OnCapturePressed : MainUiEvent
+    data class OnCapturePressed(val context: android.content.Context) : MainUiEvent
     object OnDismissResultDialog : MainUiEvent
     object OnNextPhotoPressed : MainUiEvent
 }

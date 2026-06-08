@@ -3,6 +3,7 @@ package com.example.cameratrainer.presentation.main
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,14 +27,27 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.GridOff
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +58,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -54,7 +70,7 @@ import com.example.cameratrainer.presentation.component.ViewfinderOverlay
 
 /**
  * Main screen of the Camera Trainer.
- * Manages rendering the background image, zooming, and panning using gestures.
+ * Manages rendering the background image, zooming, panning, dynamic viewfinder scale, and AI Settings.
  */
 @Composable
 fun MainScreen(
@@ -62,6 +78,12 @@ fun MainScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+
+    // Load API settings on initial composition
+    LaunchedEffect(Unit) {
+        viewModel.onEvent(MainUiEvent.OnLoadSettings(context))
+    }
 
     Box(
         modifier = modifier
@@ -90,7 +112,7 @@ fun MainScreen(
                 AsyncImage(
                     model = state.activePhoto!!.url,
                     contentDescription = "Real World Photo",
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Crop, // Crop fills the screen making it larger than the viewfinder!
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer(
@@ -104,11 +126,14 @@ fun MainScreen(
         }
 
         // 2. VIEWFINDER BOUNDARY BOX - Used to measure viewfinder sizing dynamically
-        // Viewfinder has a fixed 4:3 aspect ratio placed at the center of the screen
+        // Viewfinder width and height are scaled dynamically by state.viewfinderScale
+        val vfWidth = 320.dp * state.viewfinderScale
+        val vfHeight = 240.dp * state.viewfinderScale
+
         Box(
             modifier = Modifier
-                .width(320.dp)
-                .height(240.dp)
+                .width(vfWidth)
+                .height(vfHeight)
                 .align(Alignment.Center)
                 .onGloballyPositioned { layoutCoordinates ->
                     // Measure viewfinder size in pixels to feed the coordinate translation algorithm
@@ -191,6 +216,24 @@ fun MainScreen(
             }
         }
 
+        // Floating Settings button at top right
+        IconButton(
+            onClick = { viewModel.onEvent(MainUiEvent.OnOpenSettings) },
+            modifier = Modifier
+                .statusBarsPadding()
+                .padding(16.dp)
+                .align(Alignment.TopEnd)
+                .size(40.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings",
+                tint = Color.White
+            )
+        }
+
         // 5. FOOTER UI - Camera control dials
         Column(
             modifier = Modifier
@@ -200,6 +243,36 @@ fun MainScreen(
                 .align(Alignment.BottomCenter),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Viewfinder size adjustment slider
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "VIEWFINDER SIZE",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Slider(
+                    value = state.viewfinderScale,
+                    onValueChange = { viewModel.onEvent(MainUiEvent.OnViewfinderScaleChanged(it)) },
+                    valueRange = 0.4f..1.0f,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             // Guideline rule selection tab bar
             Row(
                 modifier = Modifier
@@ -259,7 +332,7 @@ fun MainScreen(
                         .size(76.dp)
                         .background(Color.White.copy(alpha = 0.15f), CircleShape)
                         .border(4.dp, Color.White, CircleShape)
-                        .clickable { viewModel.onEvent(MainUiEvent.OnCapturePressed) }
+                        .clickable { viewModel.onEvent(MainUiEvent.OnCapturePressed(context)) }
                         .padding(8.dp)
                 ) {
                     Box(
@@ -328,6 +401,107 @@ fun MainScreen(
                 onDismiss = { viewModel.onEvent(MainUiEvent.OnDismissResultDialog) },
                 onNextPhoto = { viewModel.onEvent(MainUiEvent.OnNextPhotoPressed) }
             )
+        }
+
+        // 8. SETTINGS DIALOG (Gemini Configuration)
+        if (state.isSettingsOpen) {
+            SettingsDialog(
+                apiKey = state.apiKey,
+                onDismiss = { viewModel.onEvent(MainUiEvent.OnCloseSettings) },
+                onSave = { newKey -> viewModel.onEvent(MainUiEvent.OnSaveApiKey(newKey, context)) }
+            )
+        }
+    }
+}
+
+@Composable
+fun SettingsDialog(
+    apiKey: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var tempKey by remember { mutableStateOf(apiKey) }
+    
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp)),
+            color = Color(0xFF1E293B)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "GEMINI CONFIGURATION",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Enter your Gemini API Key to unlock real-time composition critique, pros & cons, and recommendations.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // API Key Input
+                OutlinedTextField(
+                    value = tempKey,
+                    onValueChange = { tempKey = it },
+                    placeholder = { 
+                        Text(
+                            text = "AIzaSy...", 
+                            color = Color.White.copy(alpha = 0.3f),
+                            fontSize = 13.sp
+                        ) 
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 13.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.White,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                        cursorColor = Color.White
+                    )
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
+                    ) {
+                        Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    
+                    Button(
+                        onClick = { onSave(tempKey) },
+                        modifier = Modifier.weight(1.2f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color(0xFF0F172A)
+                        )
+                    ) {
+                        Text("Save Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }
